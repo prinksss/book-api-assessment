@@ -8,6 +8,8 @@ from .models import Book, Token
 from .serializers import BookSerializer, UserSerializer
 from django.contrib.auth.models import User
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework.exceptions import ValidationError
+from django.core.cache import cache
 
 
 class UserRegistrationAPIView(generics.CreateAPIView):
@@ -44,6 +46,31 @@ class BookCreateAPIView(generics.CreateAPIView):
     serializer_class = BookSerializer
     permission_classes = (IsAuthenticated,)
     authentication_classes = (JWTAuthentication,)
+
+    def create(self, request, *args, **kwargs):
+        if "book_cache" not in cache:
+            cache.set("book_cache", [])
+
+        book_data = request.data
+
+        book_cache = cache.get("book_cache")
+        for book_item in book_cache:
+            if all(
+                book_item[key] == book_data[key] for key in book_data if key != "id"
+            ):
+                raise ValidationError("Book with these attributes already exists")
+
+        serializer = self.get_serializer(data=book_data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+
+        book_cache.append(serializer.data)
+        cache.set("book_cache", book_cache)
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(
+            serializer.data, status=status.HTTP_201_CREATED, headers=headers
+        )
 
 
 class BookListAPIView(generics.ListAPIView):
